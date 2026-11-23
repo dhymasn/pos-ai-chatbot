@@ -1,5 +1,11 @@
 import mysql from 'mysql2/promise';
 
+if (!process.env.TIDB_HOST) {
+  console.error(
+    '❌ ERROR: TIDB_HOST tidak ditemukan. Pastikan .env.local ada di root folder dan server sudah di-restart.'
+  );
+}
+
 const pool = mysql.createPool({
   host: process.env.TIDB_HOST,
   port: Number(process.env.TIDB_PORT) || 4000,
@@ -8,7 +14,7 @@ const pool = mysql.createPool({
   database: process.env.TIDB_DATABASE,
   ssl: {
     minVersion: 'TLSv1.2',
-    rejectUnauthorized: true,
+    rejectUnauthorized: false,
   },
   waitForConnections: true,
   connectionLimit: 10,
@@ -16,8 +22,13 @@ const pool = mysql.createPool({
 });
 
 export async function executeQuery<T>(query: string, params: any[] = []): Promise<T> {
-  const [rows] = await pool.execute(query, params);
-  return rows as T;
+  try {
+    const [rows] = await pool.execute(query, params);
+    return rows as T;
+  } catch (error) {
+    console.error('[TiDB Query Error]:', error);
+    throw error;
+  }
 }
 
 export default pool;

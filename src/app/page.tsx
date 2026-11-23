@@ -3,8 +3,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Bot, Send, ShoppingBag, Globe, Sparkles,
-  AlertTriangle, CheckCircle2, Plus, Trash2, Loader2
+  Bot,
+  Send,
+  ShoppingBag,
+  Globe,
+  Sparkles,
+  AlertTriangle,
+  CheckCircle2,
+  Plus,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import { dictionary, Language } from '@/lib/i18n';
 
@@ -29,17 +37,25 @@ export default function PosEnterprisePage() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<{ product: Product; qty: number }[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<'QRIS' | 'CASH' | 'DEBIT' | 'CREDIT'>('QRIS');
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [receiptNotice, setReceiptNotice] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoadingAi, setIsLoadingAi] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  const fetchProducts = () => {
     fetch('/api/products')
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) setProducts(data);
-      });
+      })
+      .catch((err) => console.error('Failed to load products:', err));
+  };
+
+  useEffect(() => {
+    fetchProducts();
   }, []);
 
   useEffect(() => {
@@ -63,8 +79,51 @@ export default function PosEnterprisePage() {
     0
   );
 
+  const handleCheckout = async () => {
+    if (cart.length === 0 || isCheckingOut) return;
+    setIsCheckingOut(true);
+    setReceiptNotice(null);
+
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentMethod,
+          cashierName: 'Kasir Utama',
+          items: cart.map((c) => ({
+            productId: c.product.id,
+            qty: c.qty,
+          })),
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setReceiptNotice(`❌ ${data.error || 'Checkout gagal'}`);
+        return;
+      }
+
+      const successLabel =
+        (t as unknown as Record<string, string>).checkoutSuccess ||
+        (lang === 'en'
+          ? 'Transaction saved with invoice number'
+          : 'Transaksi berhasil disimpan dengan nomor invoice');
+
+      setReceiptNotice(
+        `✅ ${successLabel}: ${data.invoiceNumber} (Rp ${Number(data.totalAmount).toLocaleString('id-ID')} • ${data.paymentMethod})`
+      );
+      setCart([]);
+      fetchProducts();
+    } catch {
+      setReceiptNotice('❌ Connection error while processing checkout.');
+    } finally {
+      setIsCheckingOut(false);
+    }
+  };
+
   const handleSendMessage = async (customPrompt?: string) => {
-    const textToSend = customPrompt || input;
+    const textToSend = customPrompt ?? input;
     if (!textToSend.trim() || isLoadingAi) return;
 
     const updatedMessages: ChatMessage[] = [
@@ -84,7 +143,7 @@ export default function PosEnterprisePage() {
       const data = await res.json();
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: data.reply || data.error },
+        { role: 'assistant', content: data.reply || data.error || 'No response' },
       ]);
     } catch {
       setMessages((prev) => [
@@ -98,7 +157,7 @@ export default function PosEnterprisePage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30">
-      {/* Top Navbar */}
+      {/* Header */}
       <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md px-6 py-4 flex items-center justify-between sticky top-0 z-20">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
@@ -110,7 +169,6 @@ export default function PosEnterprisePage() {
           </div>
         </div>
 
-        {/* Language Switcher */}
         <motion.button
           whileTap={{ scale: 0.95 }}
           onClick={() => setLang(lang === 'id' ? 'en' : 'id')}
@@ -121,9 +179,9 @@ export default function PosEnterprisePage() {
         </motion.button>
       </header>
 
-      {/* Main Workspace */}
+      {/* Workspace */}
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-w-[1600px] w-full mx-auto">
-        {/* Left: POS Product Grid & Cart (7 Cols) */}
+        {/* Left: Catalog & Cart */}
         <div className="lg:col-span-7 flex flex-col gap-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {products.map((product, idx) => {
@@ -152,8 +210,12 @@ export default function PosEnterprisePage() {
                           : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                       }`}
                     >
-                      {isLowStock ? <AlertTriangle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
-                      Stok: {product.stock}
+                      {isLowStock ? (
+                        <AlertTriangle className="w-3 h-3" />
+                      ) : (
+                        <CheckCircle2 className="w-3 h-3" />
+                      )}
+                      {t.stockLabel}: {product.stock}
                     </span>
                   </div>
                   <div className="mt-4 flex items-center justify-between">
@@ -169,7 +231,6 @@ export default function PosEnterprisePage() {
             })}
           </div>
 
-          {/* Active Cart Summary */}
           <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 flex-1 flex flex-col justify-between">
             <div>
               <div className="flex justify-between items-center mb-4">
@@ -181,7 +242,7 @@ export default function PosEnterprisePage() {
                     onClick={() => setCart([])}
                     className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1"
                   >
-                    <Trash2 className="w-3.5 h-3.5" /> Reset
+                    <Trash2 className="w-3.5 h-3.5" /> {t.reset}
                   </button>
                 )}
               </div>
@@ -207,26 +268,62 @@ export default function PosEnterprisePage() {
               )}
             </div>
 
-            <div className="pt-4 mt-4 border-t border-slate-800 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-slate-400">{t.total}</p>
-                <p className="text-xl font-bold text-white">
-                  Rp {totalAmount.toLocaleString('id-ID')}
-                </p>
+            {receiptNotice && (
+              <div className="mt-4 px-3.5 py-2.5 rounded-xl bg-slate-800/90 border border-slate-700 text-xs text-slate-200">
+                {receiptNotice}
               </div>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                disabled={cart.length === 0}
-                className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 font-medium text-sm text-white shadow-lg shadow-indigo-600/20 transition-all"
-              >
-                {t.checkout}
-              </motion.button>
+            )}
+
+            <div className="pt-4 mt-4 border-t border-slate-800 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs text-slate-400">
+                  {(t as unknown as Record<string, string>).paymentMethod ||
+                    (lang === 'en' ? 'Payment Method' : 'Metode Pembayaran')}
+                </span>
+                <div className="flex gap-1.5">
+                  {(['QRIS', 'CASH', 'DEBIT', 'CREDIT'] as const).map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setPaymentMethod(method)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                        paymentMethod === method
+                          ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
+                          : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {method}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-slate-400">{t.total}</p>
+                  <p className="text-xl font-bold text-white">
+                    Rp {totalAmount.toLocaleString('id-ID')}
+                  </p>
+                </div>
+                <motion.button
+                  type="button"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  disabled={cart.length === 0 || isCheckingOut}
+                  onClick={handleCheckout}
+                  className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 font-medium text-sm text-white shadow-lg shadow-indigo-600/20 transition-all"
+                >
+                  {isCheckingOut
+                    ? (t as unknown as Record<string, string>).processing ||
+                      (lang === 'en' ? 'Processing...' : 'Memproses...')
+                    : t.checkout}
+                </motion.button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Right: Groq AI Operational Copilot (5 Cols) */}
+        {/* Right: AI Operational Copilot */}
         <div className="lg:col-span-5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col h-[680px] overflow-hidden shadow-2xl">
           <div className="p-4 border-b border-slate-800 bg-slate-900 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -246,7 +343,6 @@ export default function PosEnterprisePage() {
             </div>
           </div>
 
-          {/* Chat Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <AnimatePresence initial={false}>
               {messages.map((msg, i) => (
@@ -277,13 +373,12 @@ export default function PosEnterprisePage() {
                 className="flex items-center gap-2 text-xs text-slate-400 bg-slate-800/40 w-fit px-3.5 py-2 rounded-full"
               >
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
-                <span>Querying TiDB & Analyzing SOP...</span>
+                <span>{t.thinking}</span>
               </motion.div>
             )}
             <div ref={chatEndRef} />
           </div>
 
-          {/* Quick Operational Prompts */}
           <div className="px-4 py-2 flex gap-2 overflow-x-auto border-t border-slate-800/60 bg-slate-900/50">
             {t.quickPrompts.map((qp, idx) => (
               <button
@@ -296,7 +391,6 @@ export default function PosEnterprisePage() {
             ))}
           </div>
 
-          {/* Input Box */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
