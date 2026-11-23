@@ -8,6 +8,7 @@ const PREFERRED_MODELS = [
   process.env.GROQ_MODEL,
   'llama-3.1-8b-instant',
   'meta-llama/llama-4-scout-17b-16e-instruct',
+  'meta-llama/llama-4-maverick-17b-128e-instruct',
   'qwen/qwen3-32b',
 ].filter(Boolean) as string[];
 
@@ -22,7 +23,8 @@ async function getChatModelCandidates(): Promise<string[]> {
           !id.includes('guard') &&
           !id.includes('tts') &&
           !id.includes('orpheus') &&
-          !id.includes('playai')
+          !id.includes('playai') &&
+          !id.includes('allam')
       );
 
     const prioritized = PREFERRED_MODELS.filter((id) => validChatIds.includes(id));
@@ -60,16 +62,19 @@ async function createChatCompletion(
       });
     } catch (err: unknown) {
       lastError = err;
-      const e = err as { status?: number; error?: { code?: string } };
+      const e = err as { status?: number; error?: { code?: string; param?: string; message?: string } };
       const code = e?.error?.code;
+      const msg = e?.error?.message || '';
 
       if (
         e?.status === 404 ||
         code === 'model_not_found' ||
         code === 'model_terms_required' ||
-        code === 'tool_use_failed'
+        code === 'tool_use_failed' ||
+        e?.error?.param === 'tool calling' ||
+        msg.toLowerCase().includes('tool calling is not supported')
       ) {
-        console.warn(`[Groq] Melewati model ${model} (${code || e?.status})...`);
+        console.warn(`[Groq] Melewati model ${model} (${code || e?.error?.param || e?.status})...`);
         continue;
       }
       throw err;
